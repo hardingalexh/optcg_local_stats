@@ -3,17 +3,30 @@ import csv
 import polars as pl
 from datetime import date
 
-BASE_URL = ""
-AUTH_KEY = "<YOUR_AUTH_KEY>"
+
+AUTH_KEY = "YOUR_AUTH_KEY"
+
+# Replace with your actual authentication key
+# Log in to Bandai TCG+, open your browser's console, and type in localStorage.userToken to get your authentication key.
 
 
 def get_initial_data():
-    with open("matches.csv", "r") as csvfile:
-        reader = csv.DictReader(csvfile)
-        matches = [row for row in reader]
-    with open("events.csv", "r") as csvfile:
-        reader = csv.DictReader(csvfile)
-        events = [row for row in reader]
+    """
+    Get initial data from CSV files."""
+    try:
+        with open("matches.csv", "r") as csvfile:
+            reader = csv.DictReader(csvfile)
+            matches = [row for row in reader]
+
+        with open("events.csv", "r") as csvfile:
+            reader = csv.DictReader(csvfile)
+            events = [row for row in reader]
+
+    except FileNotFoundError:
+        print("File not found. Creating empty data.")
+        matches = [{"event_id": "", "membership_number": ""}]
+        events = [{"id": ""}]
+
     return matches, events
 
 
@@ -49,6 +62,8 @@ def get_all_events():
 
 
 def get_matches(event):
+    """
+    Get all matches for a given event from the Bandai TCG+ API."""
     url = f"https://api.bandai-tcg-plus.com/api/user/my/event/{event.get('id')}"
     headers = {"x-accept-version": "v1", "X-Authentication": AUTH_KEY}
     response = requests.get(url, headers=headers)
@@ -86,6 +101,9 @@ def get_matches(event):
 
 
 def write_raw_data(data_file, name):
+    """
+    Write the raw data to a CSV file.
+    """
     with open(f"{name}.csv", "w", newline="") as csvfile:
         fieldnames = data_file[0].keys()
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -95,20 +113,29 @@ def write_raw_data(data_file, name):
 
 
 def generate_rankings(rankings):
+    """
+    Generate rankings from the matches data.
+    """
     df = pl.DataFrame(rankings)
     today = date.today().strftime("%Y_%m_%d")
     agg = (
         df.group_by("membership_number")
         .agg(
             pl.col("player_name").implode().alias("player_names"),
-            pl.col("game_win_percentage").mean().alias("game_win_percentage"),
+            pl.col("game_win_percentage").mean().alias("avg_win_percentage"),
             pl.col("win_count").sum().alias("win_count"),
             pl.col("lose_count").sum().alias("lose_count"),
             pl.col("draw_count").sum().alias("draw_count"),
             pl.len().alias("events_played"),
         )
-        .with_columns(pl.col("player_names").list.unique().list.join(" | "))
-        .sort("game_win_percentage", descending=True)
+        .with_columns(
+            pl.col("player_names").list.unique().list.join(" | "),
+            (
+                (pl.col("win_count") / (pl.col("win_count") + pl.col("lose_count")))
+                * 100
+            ).alias("overall_win_percentage"),
+        )
+        .sort("avg_win_percentage", descending=True)
     )
     agg.write_csv(f"rankings_{today}.csv")
 
@@ -118,7 +145,7 @@ def deduplicate(data, columns):
     Deduplicate the data based on the specified column.
     """
     df = pl.DataFrame(data)
-    deduped_df = df.unique(subset=columns)
+    deduped_df = df.unique(subset=columns).drop_nulls()
     return deduped_df.to_dicts()
 
 
