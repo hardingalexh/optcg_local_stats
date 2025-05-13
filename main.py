@@ -37,9 +37,22 @@ def get_all_events():
     events_total = 99999
     events_gathered = []
     while len(events_gathered) < events_total:
-        url = f"https://api.bandai-tcg-plus.com/api/user/my/event?country_code[]=US&pref_code[]=&limit=100&past_event_display_flg=1&selected_tab=3&favorite=0&game_title_id=&offset={len(events_gathered)}&start_date=2021-01-01"
+        url = "https://api.bandai-tcg-plus.com/api/user/my/event"
+        params = {
+            "organizer_name": "Atomic Empire",  # only atomic
+            "country_code[]": "US",
+            "pref_code[]": "",
+            "limit": 100,
+            "past_event_display_flg": 1,  # allow past events
+            "selected_tab": 3,  # selecting the "historical"
+            "favorite": 0,  # all events, not just favorite venues
+            "game_title_id": 4,  # one piece events only
+            "online_flag[]": 0,  # offline events only
+            "offset": len(events_gathered),
+            "start_date": "2021-01-01",
+        }
         headers = {"x-accept-version": "v1", "X-Authentication": AUTH_KEY}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, params=params)
         if response.status_code != 200:
             print(f"Error: {response.status_code}")
             break
@@ -49,6 +62,7 @@ def get_all_events():
         def format_event(event):
             return {
                 "id": event.get("id"),
+                "organizer_name": event.get("organizer_name"),
                 "start_datetime": event.get("start_datetime"),
                 "event_series_title": event.get("event_series_title"),
                 "is_area_championship": event.get("is_area_championship"),
@@ -129,7 +143,9 @@ def generate_rankings(rankings):
             pl.len().alias("events_played"),
         )
         .with_columns(
-            pl.col("player_names").list.unique().list.join(" | "),
+            pl.col("player_names")
+            .list.unique()
+            .list.join(" | "),  # join unique player names for each membership number
             (
                 (pl.col("win_count") / (pl.col("win_count") + pl.col("lose_count")))
                 * 100
@@ -137,6 +153,7 @@ def generate_rankings(rankings):
         )
         .sort("avg_win_percentage", descending=True)
     )
+    agg = agg.filter(pl.col("events_played") >= 5)
     agg.write_csv(f"rankings_{today}.csv")
 
 
@@ -158,6 +175,9 @@ def main():
     new_events = get_all_events()
     new_matches = []
     for event in new_events:
+        print(
+            f"Getting matches for event {event.get('event_series_title')} at {event.get('event_series_title')}"
+        )
         event_matches = get_matches(event)
         new_matches = [*new_matches, *event_matches]
 
